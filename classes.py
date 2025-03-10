@@ -1,8 +1,20 @@
 import math
 import numpy as np
+import json
 
 class City:
-    def __init__(self, tiles=None, pop=1, housing=5, amenities=0, capital=True, center=None):
+    def update_production(self):
+        worked_tiles = self.tiles[:self.pop]
+        self.ppt = np.sum(worked_tiles, axis=0)[1] + self.center[1]
+
+
+    def update_foodprod(self):
+        worked_tiles = self.tiles[:self.pop]
+        self.fpt = np.sum(worked_tiles, axis=0)[0] + self.center[0]
+
+
+    def __init__(self, tiles=None, pop=1, housing=5, amenities=0, capital=True, center=None,
+                 build_order=['scout', 'scout', 'settler', 'settler']):
         if center is None:
             self.center = (2, 1)
         if tiles is None:
@@ -17,17 +29,51 @@ class City:
         self.amenities = amenities
         self.capital = capital
         self.tiles = tiles
-        self.cumprod = []
+        self.build_order = build_order
+        self.cumprod = [0]
         self.basket = 0
+        self.update_production()
+        self.update_foodprod()
+        self.init_prod_legend()
+        self.init_settler_timing()
+        self.remaining_settlers = self.settler_timing.copy()
+        self.init_growth_reqs()
+
+
+    def init_growth_reqs(self):
         self.growth_requirement = {
-            1: 15,
+             1: 15,
             2: 24,
             3: 33,
             4: 44,
             5: 55,
             6: 66, 
             7: 77
+
         }
+
+
+    def init_prod_legend(self):
+        with open('prod_legend.json') as file:
+            legend = json.load(file)
+
+        self.prod_legend = legend
+
+
+    def init_settler_timing(self):
+        bo = self.build_order
+        print(f'bo is {bo}')
+
+        if 'settler' not in bo:
+            return None
+        else:
+            bo_costs = [self.prod_legend[item] for item in self.build_order]
+            print(f'bocost is {bo_costs}')
+            cum_cost = np.cumsum(bo_costs)
+            print(f'cum_cost is {cum_cost}')
+            settler_thresholds = cum_cost[np.where(np.array(bo)=='settler')]
+        
+        self.settler_timing = settler_thresholds
 
 
     def get_production(self, pop):
@@ -38,16 +84,6 @@ class City:
     def get_foodprod(self, pop):
         worked_tiles = self.tiles[:pop]
         return np.sum(worked_tiles, axis=0)[0] + self.center[0]
-
-
-    def update_production(self):
-        worked_tiles = self.tiles[:self.pop]
-        self.ppt = np.sum(worked_tiles, axis=0)[1] + self.center[1]
-        
-
-    def update_foodprod(self):
-        worked_tiles = self.tiles[:self.pop]
-        self.fpt = np.sum(worked_tiles, axis=0)[0] + self.center[0]
 
 
     def get_growth_from_housing(self):
@@ -138,6 +174,10 @@ class City:
         self.update_production()
         
         self.cumprod.append(self.ppt) 
+        if (self.cumprod[-1] > self.remaining_settlers[0]):
+            self.pop -= 1
+            del self.remaining_settlers[0]
+
         self.basket += self.fpt - self.pop * 2
 
         greq = self.growth_requirement[self.pop]
