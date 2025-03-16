@@ -1,16 +1,35 @@
 import numpy as np
 import gymnasium as gym
 
+class SB3Wrap(gym.Wrapper):
+    def __init__(self, gym_env):
+        super().__init__(gym_env)
+        # self.env = gym_env
+        # self.action_space = gym_env.action_space
+        # self.observation_space = gym_env.observation_space
+
+    def reset(self, **kwargs):
+        obs, _ = self.env.reset(**kwargs)
+
+        return obs, {}
+    
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        done = terminated or truncated
+        
+        return obs, reward, done, info
+
 class City(gym.Env):
 
     def __init__(self, workable_tiles, center=(2,1)):
-        self.workable_tiles = np.array(workable_tiles)
+        self.workable_tiles = np.array(workable_tiles, dtype=np.int32).reshape(-1,2)
         self.max_tiles = len(workable_tiles)
         self.center = np.array(center)
 
         self.population = 1
         self.total_production = 0
         self.turn = 0
+        self.episode_count = 0
         self.basket = 0
         self.init_growth_reqs()
 
@@ -23,18 +42,20 @@ class City(gym.Env):
             "workable_tiles": gym.spaces.Box(
                 low=np.zeros((self.max_tiles, 2)),
                 high=np.ones((self.max_tiles, 2)) * 5,
-                dtype=int
+                dtype=np.int32
             ),
             "worked_tiles": gym.spaces.MultiBinary(self.max_tiles),
             "yields": gym.spaces.Box(
-                low=np.ones(2), high=np.sum(self.workable_tiles, axis=0), dtype=int),
-            "basket": gym.spaces.Box(low=0, high=100, shape=(1,), dtype=np.float64)
+                low=np.ones(2), 
+                high=np.sum(self.workable_tiles, axis=0),
+                dtype=np.int32
+            ),
+            "basket": gym.spaces.Box(low=0, high=100, shape=(1,), dtype=np.float32)
         })
 
         self.action_space = gym.spaces.Box(
-            low=np.zeros(self.max_tiles),
-            high=np.ones(self.max_tiles),
-            dtype=np.float64
+            low=np.ones(self.max_tiles, dtype=np.float32)*-1,
+            high=np.ones(self.max_tiles, dtype=np.float32)
         )
 
         self.worked_tiles = np.array([False] * self.max_tiles)
@@ -43,12 +64,15 @@ class City(gym.Env):
 
 
     def _process_action(self, action):
-        n = self.population
-        indices = np.argsort(action)[-n:]
+        try:
+            n = self.population
+            indices = np.argsort(action)[-n:]
 
-        worked_tiles = np.zeros_like(action, dtype=bool)
-        worked_tiles[indices] = True
-        self.worked_hist.append(worked_tiles)
+            worked_tiles = np.zeros_like(action, dtype=bool)
+            worked_tiles[indices] = True
+            self.worked_hist.append(worked_tiles)
+        except Exception as e:
+            raise ValueError(e)
 
         return worked_tiles
 
@@ -57,10 +81,10 @@ class City(gym.Env):
         yields = np.sum(self.workable_tiles[self.worked_tiles], axis=0) + self.center
         return {"population": self.population,
                 "turn": self.turn,
-                "workable_tiles": self.workable_tiles,
-                "worked_tiles": self.worked_tiles,
-                "yields": yields,
-                "basket": self.basket
+                "workable_tiles": np.array(self.workable_tiles, dtype=np.int32),
+                "worked_tiles": np.array(self.worked_tiles, dtype=np.int8),
+                "yields": np.array(yields, dtype=np.int32),
+                "basket": np.array([self.basket], dtype=np.float32)
                 }
 
 
@@ -88,6 +112,7 @@ class City(gym.Env):
         truncated = False
         
         if terminated:
+            self.episode_count += 1
             info = {
                 "pophist": self.pophist, 
                 "prodhist": self.prodhist,
@@ -99,9 +124,9 @@ class City(gym.Env):
         return observation, reward, terminated, truncated, info
 
 
-
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
+
         self.population = 1
         self.pophist = [1]
         self.total_production = 0
@@ -113,7 +138,7 @@ class City(gym.Env):
         self.worked_tiles[np.random.randint(self.max_tiles)] = True
         self.worked_hist = [self.worked_tiles]
 
-        return self._get_obs() , {}
+        return self._get_obs(), {}
 
 
     def init_growth_reqs(self):
