@@ -1,18 +1,57 @@
-import math
+import matplotlib.pyplot as plt
 import numpy as np
+import math
 import json
 
+
+class SimpleCity:
+    def __init__(self, workable_tiles, center=(2,1)):
+        self.workable_tiles = workable_tiles
+        self.center = center
+
+        self.pop = 1
+        self.total_production = 0
+        self.turn = 0
+        self.basket = 0
+        self.init_growth_reqs()
+
+        self.worked_tiles = [False] * len(workable_tiles)
+        self.worked_tiles[np.random.randint(len(workable_tiles))] = True
+
+
+    def end_turn(self, worked_tiles):
+        tot_yields = np.sum(self.available_tiles[worked_tiles], axis=0)
+        food = tot_yields[0]
+        prod = tot_yields[1]
+
+        # food
+        self.basket += food
+        greq = self.growth_requirement[self.pop]
+        if self.basket > greq:
+            basket -= greq
+            self.pop += 1
+        # prod
+        self.total_production += prod
+
+        self.turn += 1
+
+
+    def init_growth_reqs(self):
+            self.growth_requirement = {
+                1: 15,
+                2: 24,
+                3: 33,
+                4: 44,
+                5: 55,
+                6: 66, 
+                7: 77
+            }
+
+
+
+
+
 class City:
-    def update_production(self):
-        worked_tiles = self.tiles[:self.pop]
-        self.ppt = np.sum(worked_tiles, axis=0)[1] + self.center[1]
-
-
-    def update_foodprod(self):
-        worked_tiles = self.tiles[:self.pop]
-        self.fpt = np.sum(worked_tiles, axis=0)[0] + self.center[0]
-
-
     def __init__(self, tiles=None, pop=1, housing=5, amenities=0, capital=True, center=None,
                  build_order=['scout', 'scout', 'settler', 'settler']):
         if center is None:
@@ -40,16 +79,25 @@ class City:
         self.init_growth_reqs()
 
 
+    def update_production(self):
+        worked_tiles = self.tiles[:self.pop]
+        self.ppt = np.sum(worked_tiles, axis=0)[1] + self.center[1]
+
+
+    def update_foodprod(self):
+        worked_tiles = self.tiles[:self.pop]
+        self.fpt = np.sum(worked_tiles, axis=0)[0] + self.center[0]
+
+
     def init_growth_reqs(self):
         self.growth_requirement = {
-             1: 15,
+            1: 15,
             2: 24,
             3: 33,
             4: 44,
             5: 55,
             6: 66, 
             7: 77
-
         }
 
 
@@ -62,15 +110,12 @@ class City:
 
     def init_settler_timing(self):
         bo = self.build_order
-        print(f'bo is {bo}')
 
         if 'settler' not in bo:
             return None
         else:
             bo_costs = [self.prod_legend[item] for item in self.build_order]
-            print(f'bocost is {bo_costs}')
             cum_cost = np.cumsum(bo_costs)
-            print(f'cum_cost is {cum_cost}')
             settler_thresholds = cum_cost[np.where(np.array(bo)=='settler')]
         
         self.settler_timing = settler_thresholds
@@ -129,7 +174,7 @@ class City:
 
 
     def get_satisfaction_growth(self):
-        satisfaction = self.get_satisfation_level()
+        satisfaction = self.get_satisfaction_level()
 
         match satisfaction:
             case 'ecstatic' | 'happy' | 'content':
@@ -162,7 +207,12 @@ class City:
 
     def get_growth(self):
         excess_food = self.fpt - self.pop * 2
-        return excess_food
+        housing_mult = self.get_growth_from_housing()
+        amenities_mult = self.get_satisfaction_growth()
+
+        growth = excess_food * (housing_mult + amenities_mult - 1)
+
+        return growth
 
 
     def get_turns_to_growth(self):
@@ -173,13 +223,15 @@ class City:
         self.update_foodprod()
         self.update_production()
         
+        # prod tracking
         self.cumprod.append(self.ppt) 
         if (self.cumprod[-1] > self.remaining_settlers[0]):
             self.pop -= 1
             del self.remaining_settlers[0]
 
-        self.basket += self.fpt - self.pop * 2
-
+        # growth calc
+        self.pophist.append(self.pop)
+        self.basket += self.get_growth() 
         greq = self.growth_requirement[self.pop]
         if self.basket >= greq:
             self.basket -= greq
@@ -190,14 +242,25 @@ class City:
             print(self)
 
 
+    def get_prod_path(self):
+        return np.cumsum(self.cumprod)
+
+
     def __str__(self, turn=None):
         if turn is None:
             return (
                 f'Pop: {self.pop}\n'
+                f'Worked tiles: {self.tiles[:self.pop]}\n'
                 f'Yields: {self.fpt} food; {self.ppt} prod\n'
+                f'Excess food: {self.fpt - self.pop * 2}\n'
                 f'Growth: {self.get_growth()}\n'
+                f'Multipliers: Amenities: {self.get_satisfaction_growth()} '
+                f'Housing: {self.get_growth_from_housing()}\n'
                 f'Basket: {self.basket}\n'
+                f'Turns to growth: {self.get_turns_to_growth()}'
+                f'Total prod: {self.get_prod_path()}'
             )
+
         else:
             pop = self.pophist[turn]
             return (
@@ -208,9 +271,23 @@ class City:
             )
 
 
+    def print_timeline(self):
+        for i, era in enumerate(np.unique(self.pophist)):
+            where = np.where(np.array(self.pophist)==era)[0]
+            cprod = np.cumsum(self.cumprod)
+
+            if i == 0:
+                segment = cprod[where[0]: where[-1]+1]
+                xaxis = list(range(len(cprod)))[where[0]: where[-1]+1]
+            else:
+                segment = cprod[where[0]-1: where[-1]+1]
+                xaxis = list(range(len(cprod)))[where[0]-1: where[-1]+1]
+
+            plt.plot(xaxis, segment)
+
+            
+
+
+
     def turn_report(self):
         print(f'Yields: {self.ppt} prod & {self.fpt} food\n')
-
-
-    def get_prod_path(self):
-        return np.cumsum(self.cumprod)
