@@ -22,9 +22,14 @@ class SB3Wrap(gym.Wrapper):
 class City(gym.Env):
 
     def __init__(self, workable_tiles, center=(2,1), settler_timing=None, amenities=0,
-                 housing=5):
+                 housing=5, capital=True, target_prod=140):
         self.CENTER = np.array(center)
-        self.SETTLER_TIMING = settler_timing
+        self.CAPITAL = capital
+        self.TARGET_PROD = target_prod
+        if settler_timing is None:
+            self.SETTLER_TIMING = []
+        else:
+            self.SETTLER_TIMING = settler_timing
 
         self.settler_breakpoints = self.SETTLER_TIMING.copy()
         self.workable_tiles = np.array(workable_tiles, dtype=np.int32).reshape(-1,2)
@@ -34,9 +39,9 @@ class City(gym.Env):
 
         self.population = 1
         self.total_production = 0
-        self.turn = 0
         self.episode_count = 0
         self.basket = 0
+        self.turn = 0
         self.init_growth_reqs()
 
         self.pophist = np.array([1], dtype=np.int32)
@@ -96,29 +101,37 @@ class City(gym.Env):
 
     def step(self, action):
         self.worked_tiles = self._process_action(action)
-        tot_yields = np.sum(self.workable_tiles[self.worked_tiles], axis=0)
+        tot_yields = np.sum(self.workable_tiles[self.worked_tiles], axis=0) + self.CENTER
         food = tot_yields[0]
         prod = tot_yields[1]
 
         # food
         self.basket += self.get_growth(food)
-        greq = self.growth_requirement[self.population]
-        if self.basket >= greq:
-            self.basket -= greq
-            self.population += 1
-        self.pophist.append(self.population)
+        if self.basket < 0:
+            if self.population == 1:
+                self.basket = 0
+            else:
+                self.population -= 1
+                greq = self.growth_requirement[self.population]
+                self.basket += greq
+        else:
+            greq = self.growth_requirement[self.population]
+            if self.basket >= greq:
+                self.basket -= greq
+                self.population += 1
+        self.pophist = np.append(self.pophist, self.population)
         # prod
         self.total_production+= prod
-        self.prodhist.append(prod)
+        self.prodhist = np.append(self.prodhist, prod)
         # settler -pop
         if len(self.settler_breakpoints) > 0:
             if self.total_production > self.settler_breakpoints[0]:
-                self.pop -= 1
+                self.population -= 1
                 del self.settler_breakpoints[0]
 
         self.turn += 1
 
-        terminated = True if self.total_production >= 140 else False
+        terminated = True if self.total_production >= self.TARGET_PROD else False
         observation = self._get_obs()
         reward = -self.turn if terminated else 0
         truncated = False
@@ -140,9 +153,10 @@ class City(gym.Env):
         super().reset(seed=seed)
 
         self.population = 1
-        self.pophist = [1]
         self.total_production = 0
-        self.prodhist = [0]
+        self.pophist = np.array([1], dtype=np.int32)
+        self.prodhist = np.array([0], dtype=np.int32)
+
         self.basket = 0
         self.turn = 0
         self.settler_breakpoints = self.SETTLER_TIMING
@@ -167,7 +181,7 @@ class City(gym.Env):
 
 
     def get_growth(self, foodprod):
-        excess_food = foodprod - self.pop * 2
+        excess_food = foodprod - self.population * 2
         housing_mult = self.get_growth_from_housing()
         amenities_mult = self.get_satisfaction_growth()
 
@@ -177,7 +191,7 @@ class City(gym.Env):
 
 
     def get_growth_from_housing(self):
-        excess_housing = self.housing - self.pop
+        excess_housing = self.housing - self.population
 
         if excess_housing >= 2:
             return 1
@@ -190,8 +204,8 @@ class City(gym.Env):
 
 
     def get_amenity_requirement(self):
-        requirement = math.ceil(self.pop / 2)
-        if self.capital:
+        requirement = math.ceil(self.population / 2)
+        if self.CAPITAL:
             requirement -= 1
 
         return requirement
