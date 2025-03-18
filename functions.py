@@ -5,6 +5,7 @@ import copy
 from tqdm import tqdm
 import random
 import matplotlib.pyplot as plt
+import gymenv
 
 def sim_to_npop(n, tiles):
     a = City(tiles=tiles)
@@ -81,3 +82,38 @@ def get_possible_paths(tiles, n, paths=None):
             for tile in tiles:
                 newpaths.append(path + [tile])
         return get_possible_paths(tiles, n - 1, newpaths)
+    
+
+def sim_episode(model, env=None, deterministic=True):
+    if env is None:
+        env = model.get_env()
+    else:
+        env = gymenv.SB3Wrap(env)
+        
+    obs = env.reset()
+
+    while True:
+        action, _ = model.predict(obs, deterministic=deterministic)
+        obs, _, done, info = env.step(action)
+
+        if done:
+            env.reset()
+            return info
+        
+
+def tilehist_print(episode, tiles):
+    tilehist = episode['tilehist']
+    tiles = np.array(tiles)
+
+    for index, wt in enumerate(tilehist):
+        if index == 0:
+            print(f'Turn {index}: ')
+            print(list((int(a),int(b)) for a,b in tiles[wt]))
+            continue
+        
+        l = len(tilehist[0])
+        if sum(wt == tilehist[index - 1]) == l:
+            continue
+        else:
+            print(f'Turn {index}: ')
+            print(list((int(a),int(b)) for a,b in tiles[wt]))
